@@ -101,53 +101,66 @@ def process_files(file_path, image_metadata=None, workspace_name=None, error_con
 
             json_path = extractor.extract_all(extract_tables=False)  #extract_tables=False if isLargeFile else True
 
-            # Generate Summary & Embeddings
+            # Load extracted data
             with open(json_path, "r") as f:
                 data = json.load(f)
-            metadata_lines = [
-                # Explicit source line
-                f"source: {data['metadata']['source']}",
-                f"title: {data['metadata']['title']}",
-                f"timestamp: {data['metadata']['timestamp']}",
-                f"document_type:{data['metadata']['document_type']}",
-                f"workspace_name:{workspace_name}"
-            ]
             
-            full_text = " ".join(data["text"].values()) + \
-                "\n\nMetadata:\n" + "\n".join(metadata_lines)
-
-            logger.debug("Generating summary and embeddings")
-            summarizer = Summarizer()
-            summary = summarizer.generate_summary(full_text)
-            embedding = summarizer.generate_embeddings(summary)
-
-            # Store Data
+            # Combine all text from pages into full text
+            full_text = " ".join(data["text"].values())
+            
+            # Store in database first
             doc_id = str(uuid.uuid4())
             db = Database()
             db.insert_document(doc_id, data["metadata"]["title"], workspace_name,
                                data["metadata"]["timestamp"], json_path)
 
+            # Chunk the actual content (like TXT files) instead of just storing summary
             vs = VectorStore()
+            summarizer = Summarizer()
+            
+            # Split into chunks for better retrieval
+            chunk_size = 4000
+            chunks = [full_text[i:i+chunk_size]
+                      for i in range(0, len(full_text), chunk_size)]
+            
+            doc_id_list = []
+            for idx, chunk in enumerate(chunks):
+                chunk_metadata = {
+                    "source": data["metadata"]["source"],
+                    "title": data["metadata"]["title"],
+                    "timestamp": data["metadata"]["timestamp"],
+                    "document_type": data["metadata"]["document_type"],
+                    "chunk": idx+1,
+                    "total_chunks": len(chunks),
+                    "workspace_name": workspace_name
+                }
+                
+                # Generate embeddings for each chunk
+                logger.debug(f"Generating embeddings for chunk {idx+1}/{len(chunks)}")
+                embedding = summarizer.generate_embeddings(chunk)
+                chunk_doc_id = f"{doc_id}-{idx}"
+                vs.add_embedding(
+                    doc_id=chunk_doc_id,
+                    embedding=embedding,
+                    text=chunk,
+                    metadata=chunk_metadata
+                )
+                doc_id_list.append(chunk_doc_id)
+            
+            logger.info(f"Processed {ext} file into {len(chunks)} chunks")
+            file_name = os.path.basename(file_path)
             metadata_dict = {
                 "source": f"{data['metadata']['source']}",
                 "title": f"{data['metadata']['title']}",
                 "timestamp": f"{data['metadata']['timestamp']}",
                 "document_type": f"{data['metadata']['document_type']}",
-                "workspace_name": workspace_name
+                "workspace_name": workspace_name,
+                "output_path": f"media/output/{workspace_name}/{file_name}",
+                "doc_id": doc_id_list
             }
-            vs.add_embedding(
-                doc_id=doc_id,
-                embedding=embedding,
-                text=summary,
-                metadata=metadata_dict
-            )
-            logger.info(f"Processed {ext} file into {doc_id}")
-            file_name = os.path.basename(file_path)
-            metadata_dict["output_path"]=f"media/output/{file_name}"
-            metadata_dict["doc_id"]=doc_id
             #Saving the text metadata in docs_metadata.json
             JC._update_DOCX_metadata_file(file_name, metadata_dict)
-            return doc_id
+            return doc_id_list
     
     except (FileSizeError, FileTypeError) as e:
         logger.error(f"Cannot process file: {str(e)}")

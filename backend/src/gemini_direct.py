@@ -1,89 +1,89 @@
 import os
-import google.generativeai as genai
-
 import json
+import base64
+import io
 from dotenv import load_dotenv
+from PIL import Image
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
+
 load_dotenv()
-
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-
-
-def upload_to_gemini(path, mime_type=None):
-    """Uploads the given file to Gemini.
-
-    See https://ai.google.dev/gemini-api/docs/prompting_with_media
-    """
-    file = genai.upload_file(path, mime_type=mime_type)
-    print(f"Uploaded file '{file.display_name}' as: {file.uri}")
-    return file
 
 
 def generate_image_title_dscrpt(image_path):
-    # Create the model
-    generation_config = {
-        "temperature": 1,
-        "top_p": 0.95,
-        "top_k": 40,
-        "max_output_tokens": 8192,
-        "response_mime_type": "text/plain",
-    }
-
-    model = genai.GenerativeModel(
-        model_name="gemini-2.0-flash",
-        generation_config=generation_config,
-        system_instruction='''analyze this image, give me title and description in json format, description should be short like this
-         {
-         "title":"title of image",
-         "description":"short description of image"
-         }
-           ''',
-    )
-
-    # TODO Make these files available on the local file system
-    # You may need to update the file paths
-    files = [
-        upload_to_gemini(image_path,
-                         mime_type="image/png"),
-    ]
-
-    chat_session = model.start_chat(
-        history=[
-            {
-                "role": "user",
-                "parts": [
-                    files[0]
-                ]
-            }
-
-        ]
-    )
-
+    """
+    Generate image title and description using OpenAI Vision API.
+    Replaces the old Gemini-based implementation.
+    """
+    openai_api_key = os.environ.get("OPENAI_API_KEY")
+    
+    if not openai_api_key:
+        print("Warning: OPENAI_API_KEY not configured. Returning default image metadata.")
+        return {
+            "title": "Untitled",
+            "description": "Image description not available (OpenAI API not configured)"
+        }
+    
     try:
-        response = chat_session.send_message(
-            """Analyze this image and follow the system instruction """
+        # Initialize OpenAI client
+        llm = ChatOpenAI(
+            model="gpt-4o-mini",  # Using vision-capable model
+            temperature=0.7,
+            max_retries=3,
+            timeout=30,
+            api_key=openai_api_key
         )
+        
+        # Read and encode image
+        img = Image.open(image_path)
+        img_byte_arr = io.BytesIO()
+        img.convert("RGB").save(img_byte_arr, format='JPEG')
+        img_base64 = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
+        
+        # Build message with image
+        message_content = [
+            {
+                "type": "text",
+                "text": """Analyze this image and provide a title and short description in JSON format:
+{
+    "title": "title of image",
+    "description": "short description of image"
+}
 
-        # Clean the response
-        json_str = response.text.replace(
-            '```json', '').replace('```', '').strip()
-
-        # Parse with detailed error info
+Return only valid JSON, no markdown formatting."""
+            },
+            {
+                "type": "image_url",
+                "image_url": f"data:image/jpeg;base64,{img_base64}"
+            }
+        ]
+        
+        message = HumanMessage(content=message_content)
+        response = llm.invoke([message])
+        
+        # Extract and parse JSON from response
+        response_text = response.content if hasattr(response, "content") else str(response)
+        
+        # Clean JSON string (remove markdown code blocks if present)
+        json_str = response_text.replace('```json', '').replace('```', '').strip()
+        
+        # Parse JSON
         result = json.loads(json_str)
-        return {  # Ensure consistent structure
+        return {
             "title": result.get("title", "Untitled"),
             "description": result.get("description", "No description"),
         }
-
+        
     except json.JSONDecodeError as e:
-        print(f"JSON Error: {e}\nResponse was: {response.text}")
+        print(f"JSON Error: {e}\nResponse was: {response_text}")
         return {
             "title": "Untitled",
             "description": "No description available",
             "error": f"Invalid JSON: {str(e)}",
-            "raw_response": response.text  # For debugging
+            "raw_response": response_text
         }
-    except AttributeError as e:
-        print(f"Empty response: {e}")
+    except Exception as e:
+        print(f"Error generating image description: {str(e)}")
         return {
             "title": "Untitled",
             "description": "No response from API",

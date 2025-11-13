@@ -40,6 +40,7 @@ def answer_question(question, search_type,workspace_name=None):
     contexts = []
     sources = []
     seen_docs = set()
+    db = None  # Initialize db variable outside the loop
 
     # Context collection phase
     for doc_id in doc_ids:
@@ -52,37 +53,34 @@ def answer_question(question, search_type,workspace_name=None):
             metadata = {}
             content_type = "text"
 
-            # Check SQL database first (PDF/DOCX)
-            db=get_db()
-            result=db.get_contentPath_fromDocument(doc_id)
-
-            if result:  # Handle PDF/DOCX
-                json_path = result
-                with open(json_path, "r") as f:
-                    context = json.load(f)
-                metadata = context.get("metadata", {})
-            else:  # Handle TXT/Image chunks
-                if search_type=="image":
-                    results = vs.image_collection.get(
-                        ids=[doc_id],
-                        include=["metadatas", "documents"]
-                    )
-                # means query is from text collection
-                if search_type=="text":
-                    results  = vs.text_collection.get(
-                        ids=[doc_id],
-                        include=["metadatas", "documents"]
-                    )
-
-                if results['documents']:
+            # Check SQL database first (PDF/DOCX) - but only for base doc_ids, not chunks
+            # Chunked documents have IDs like "base-id-0", "base-id-1", etc.
+            is_chunk = "-" in doc_id and doc_id.split("-")[-1].isdigit()
+            if not is_chunk:
+                # Try database for non-chunked documents (PDF/DOCX)
+                if db is None:
+                    db = get_db()
+                result = db.get_contentPath_fromDocument(doc_id)
+                if result:
+                    json_path = result
+                    with open(json_path, "r") as f:
+                        context = json.load(f)
+                    metadata = context.get("metadata", {})
+            
+            # If not found in DB or it's a chunk, get from Pinecone
+            if not context:
+                doc_data = vs.get_document_by_id(doc_id, collection_type=search_type)
+                if doc_data:
                     context = {
-                        "text": {"content": results['documents'][0]},
-                        "metadata": results['metadatas'][0]
+                        "text": {"content": doc_data.get("content", "")},
+                        "metadata": doc_data.get("metadata", {})
                     }
-                    # print("context extracted is ::", context)
                     metadata = context["metadata"]
                     if metadata.get("document_type") == "image":
                         content_type = "image"
+                else:
+                    print(f"No document data found for doc_id: {doc_id}")
+                    continue
 
             if context:
                 # Context relevance validation
@@ -104,8 +102,13 @@ def answer_question(question, search_type,workspace_name=None):
         except Exception as e:
             print(f"Error processing {doc_id}: {str(e)}")
             continue
-        finally:
+    
+    # Close database connection after processing all documents
+    if db is not None:
+        try:
             db.conn.close()
+        except Exception as e:
+            print(f"Error closing database connection: {str(e)}")
 
 
     # Text chunk regrouping (existing functionality) , this is only for txt or md files

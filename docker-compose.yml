@@ -8,6 +8,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: frontend
+    ports:
+      - "5173:5173"
     volumes:
       - ./frontend/src:/app/src
     environment:
@@ -25,6 +27,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: backend
+    ports:
+      - "5000:5000"
     volumes:
       - ./backend/src:/app/src  # This line creates the live link to your source code
       - ./backend/media:/app/media
@@ -36,11 +40,16 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=pdf_qa
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - FRONTEND_ORIGINS=http://localhost
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - PINECONE_ENVIRONMENT=${PINECONE_ENVIRONMENT}
+      - PINECONE_REGION=${PINECONE_REGION}
+      - PINECONE_TEXT_INDEX=${PINECONE_TEXT_INDEX}
+      - PINECONE_IMAGE_INDEX=${PINECONE_IMAGE_INDEX}
+      - PINECONE_POD_TYPE=${PINECONE_POD_TYPE}
+      - FRONTEND_ORIGINS=${FRONTEND_ORIGINS}
       - BASE_URL=http://backend:5000/
-      - FLASK_ENV=development  # Enables debug mode in Flask
-      - FLASK_DEBUG=1   
+      - APP_ENV=development
     depends_on:
       - mysql
     restart: unless-stopped

@@ -87,13 +87,13 @@ Users can organize documents into workspaces, chat with their content, and recei
                  +----------------------+----------------------+
                  |                                             |
         +--------v--------+                         +----------v---------+
-        | React Frontend  |                         |   Flask Backend    |
+        | React Frontend  |                         |   FastAPI Backend  |
         +-----------------+                         +----------+---------+
                                                                |
                                                +---------------+---------------+
                                                |                               |
                                     +----------v----------+        +-----------v-----------+
-                                    |   MySQL Database     |        |   Vector Store (ChromaDB) |
+                                    |   MySQL Database     |        |   Vector Store (Pinecone) |
                                     +----------------------+        +-------------------------+
 ```
 
@@ -110,11 +110,11 @@ Users can organize documents into workspaces, chat with their content, and recei
 ### Backend
 
 * Python 3.11
-* Flask
-* Gunicorn
+* FastAPI + Uvicorn
 * MySQL Connector
 * Sentence Transformers
-* Google Gemini API
+* OpenAI API (gpt-4.1-mini)
+* Pinecone Vector Database
 * PyPDF
 
 ### Infrastructure
@@ -122,14 +122,15 @@ Users can organize documents into workspaces, chat with their content, and recei
 * Docker & Docker Compose
 * Nginx
 * MySQL 8.0
-* ChromaDB
+* Pinecone (managed vector storage)
 
 ## Prerequisites
 
 * Docker & Docker Compose
 * Git
 * 8GB+ RAM (recommended)
-* Google Gemini API key
+* OpenAI API key
+* Pinecone API key
 
 ## Installation
 
@@ -145,7 +146,12 @@ cp .env.example .env
 Edit `.env` and configure:
 
 ```env
-GEMINI_API_KEY=your-gemini-api-key
+OPENAI_API_KEY=your-openai-api-key
+PINECONE_API_KEY=your-pinecone-api-key
+PINECONE_ENVIRONMENT=your-pinecone-environment
+PINECONE_TEXT_INDEX=text-documents
+PINECONE_IMAGE_INDEX=image-documents
+PINECONE_POD_TYPE=p1.x1
 DB_HOST=mysql
 DB_USER=root
 DB_PASSWORD=your-password
@@ -196,7 +202,7 @@ Visit: [https://your-domain.com](https://your-domain.com)
 
 | Variable              | Description           | Default                                        |
 | --------------------- | --------------------- | ---------------------------------------------- |
-| GEMINI\_API\_KEY      | Google Gemini API key | None                                           |
+| OPENAI\_API\_KEY      | OpenAI API key        | None                                           |
 | DB\_HOST              | DB Hostname           | mysql                                          |
 | DB\_USER              | DB Username           | root                                           |
 | DB\_PASSWORD          | DB Password           | None                                           |
@@ -207,7 +213,12 @@ Visit: [https://your-domain.com](https://your-domain.com)
 | MYSQL\_ROOT\_PASSWORD | MySQL root password   | None                                           |
 | MYSQL\_DATABASE       | MySQL DB              | pdf\_qa                                        |
 | VITE\_BACKEND\_URL    | Frontend backend URL  | [http://localhost/api](http://localhost/api)   |
-| FLASK\_ENV            | Flask env             | development                                    |
+| PINECONE\_API\_KEY    | Pinecone API key      | None                                           |
+| PINECONE\_ENVIRONMENT | Pinecone environment  | None                                           |
+| PINECONE\_TEXT\_INDEX | Pinecone text index   | text-documents                                 |
+| PINECONE\_IMAGE\_INDEX| Pinecone image index  | image-documents                                |
+| PINECONE\_POD\_TYPE   | Pinecone pod type     | p1.x1                                          |
+| APP\_ENV              | Backend env           | development                                    |
 
 ### Nginx Configuration (default.prod.conf)
 
@@ -332,16 +343,16 @@ querypilot/
 
 ## Vector Storage
 
-### ChromaDB Collections
+### Pinecone Indexes
 
-* **Text**:
+* **Text Index**:
 
   * Document ID
   * Text content
   * Metadata
   * Vector embeddings
 
-* **Image**:
+* **Image Index**:
 
   * Document ID
   * Image description
@@ -359,7 +370,7 @@ querypilot/
 
 ## AI Integration
 
-Uses **Google Gemini API** for:
+Uses **OpenAI API** for:
 
 * Question Answering
 * Image Analysis

@@ -23,3 +23,12 @@ ALLWOED_IMAGE_EXTENSIONS=[".png",".jpg","jpeg"]  # here not putting .webp becaus
 LOGS_FILE=os.path.join(BASE_DIR, "logs")
 
 FRONTEND_ORIGINS=os.environ.get("FRONTEND_ORIGINS", "http://localhost:5173")  # Default to localhost if not set
+
+PINECONE_API_KEY=os.environ.get("PINECONE_API_KEY")
+PINECONE_ENVIRONMENT=os.environ.get("PINECONE_ENVIRONMENT")
+PINECONE_REGION=os.environ.get("PINECONE_REGION")  # For serverless indexes (e.g., "us-east-1")
+PINECONE_TEXT_INDEX=os.environ.get("PINECONE_TEXT_INDEX", "text-documents")
+PINECONE_IMAGE_INDEX=os.environ.get("PINECONE_IMAGE_INDEX", "image-documents")
+PINECONE_METRIC=os.environ.get("PINECONE_METRIC", "cosine")
+PINECONE_POD_TYPE=os.environ.get("PINECONE_POD_TYPE", "p1.x1")
+PINECONE_DIMENSION=int(os.environ.get("PINECONE_DIMENSION", "768"))

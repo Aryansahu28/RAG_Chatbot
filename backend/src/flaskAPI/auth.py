@@ -1,19 +1,26 @@
-from flask import Blueprint, request, jsonify
-from functools import wraps
 import os
-from dotenv import load_dotenv
-load_dotenv()
 
-auth_bp = Blueprint('auth', __name__)
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
-# Set your password here - ideally should be in config or env var
 PASSWORD = os.environ["ADMIN_PASSWORD"]
 
-@auth_bp.route('/validate', methods=['POST'])
-def validate_password():
-    password = request.json.get('secret_key')
-    
-    if password == PASSWORD:
-        return jsonify({"status": "success", "message": "Authentication successful"}), 200
-    else:
-        return jsonify({"status": "error", "message": "Invalid password"}), 401
+router = APIRouter()
+
+
+class ValidateRequest(BaseModel):
+    secret_key: str = Field(..., description="Shared admin secret")
+
+
+@router.post("/validate")
+async def validate_password(payload: ValidateRequest):
+    if payload.secret_key == PASSWORD:
+        return JSONResponse(
+            content={"status": "success", "message": "Authentication successful"},
+            status_code=200,
+        )
+    return JSONResponse(
+        content={"status": "error", "message": "Invalid password"},
+        status_code=401,
+    )

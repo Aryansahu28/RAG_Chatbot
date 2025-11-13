@@ -62,6 +62,11 @@ def add_file_to_json(file_path, doc_type,workspace_name):
 def _update_DOCX_metadata_file(doc_id, metadata):
         """Update the central metadata JSON file"""
         try:
+            # Ensure the directory exists
+            metadata_dir = os.path.dirname(DOCS_METADATA_FILE)
+            if metadata_dir and not os.path.exists(metadata_dir):
+                os.makedirs(metadata_dir, exist_ok=True)
+            
             # Initialize empty data if file doesn't exist
             if not os.path.exists(DOCS_METADATA_FILE):
                 data = {}

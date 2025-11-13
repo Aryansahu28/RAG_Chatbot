@@ -29,7 +29,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir \
        git+https://github.com/openai/CLIP.git@dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1 \
-       mysqlclient pymysql gunicorn
+       mysqlclient pymysql
 
 # Create necessary directories
 RUN mkdir -p /app/media/files-metadata \
@@ -43,14 +43,11 @@ RUN mkdir -p /app/media/files-metadata \
 COPY . .
 
 # Set environment variables
-ENV PYTHONPATH=/app:/app/src:/app/src/flaskAPI
+ENV PYTHONPATH=/app:/app/src
 ENV PYTHONUNBUFFERED=1
 
 # Expose port
 EXPOSE 5000
 
-# Change working directory to where the Flask app is located
-WORKDIR /app/src/flaskAPI
-
-# Use Gunicorn for production WSGI serving with the correct path
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "--timeout", "900", "index:app"]
+# Use Uvicorn for ASGI serving
+CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "5000", "--timeout-keep-alive", "120"]

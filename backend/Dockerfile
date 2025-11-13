@@ -28,6 +28,11 @@ RUN sqlite3 --version
 COPY requirements.txt .
 
 # Install Python dependencies
+ENV PIP_DEFAULT_TIMEOUT=120
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir git+https://github.com/openai/CLIP.git@dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1 \
+    && pip install --no-cache-dir mysqlclient pymysql
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir git+https://github.com/openai/CLIP.git@dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1 \
     && pip install --no-cache-dir mysqlclient pymysql
@@ -51,4 +56,4 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 5000
 
 # Command to run the application
-CMD ["python", "src/flaskAPI/index.py"]
+CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "5000"]

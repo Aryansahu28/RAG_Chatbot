@@ -1,25 +1,30 @@
+import base64
 import io
-from langchain.chains import RetrievalQA
-from langchain_google_genai import GoogleGenerativeAI
-from tenacity import retry, wait_exponential_jitter, stop_after_attempt
-import time
-from PIL import Image
 import os
+import time
+from typing import Sequence, Union
+
 from dotenv import load_dotenv
-load_dotenv()
+from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_openai import ChatOpenAI
+from PIL import Image
+from tenacity import retry, stop_after_attempt, wait_exponential_jitter
+
 import config as cfg
+
+load_dotenv()
 media_output_dir=cfg.OUTPUT_DIR
 base_url=cfg.BASE_URL
 upoad_dir=cfg.UPLOAD_DIR
 
 class QAChain:
     def __init__(self):
-        self.llm = GoogleGenerativeAI(
-            model="gemini-2.0-flash",  
+        self.llm = ChatOpenAI(
+            model="gpt-4.1-mini",
             temperature=0,
-            max_retries=5,  # Explicit retries
-            request_timeout=30, # Timeout in seconds
-            api_key=os.environ.get("GEMINI_API_KEY")
+            max_retries=5,
+            timeout=30,
+            api_key=os.environ.get("OPENAI_API_KEY")
         )
         self.model = self.llm
         self.last_call_time = 0
@@ -27,13 +32,23 @@ class QAChain:
     @retry(wait=wait_exponential_jitter(initial=2, max=60),
            stop=stop_after_attempt(5),
            reraise=True)
-    def _safe_llm_call(self, messages):
+    def _safe_llm_call(self, message: Union[str, BaseMessage, Sequence[BaseMessage]]):
         # Enforce rate limiting
         elapsed = time.time() - self.last_call_time
         if elapsed < 1.2:  # 50 RPM limit (1.2s between calls)
             time.sleep(1.2 - elapsed)
 
-        return self.llm.invoke(messages)
+        if isinstance(message, str):
+            payload = message
+        elif isinstance(message, BaseMessage):
+            payload = [message]
+        else:
+            payload = message
+
+        response = self.llm.invoke(payload)
+        self.last_call_time = time.time()
+
+        return response.content if hasattr(response, "content") else response
 
     def generate_answer(self, context_list, question):
         # Extract image paths from context
@@ -149,8 +164,8 @@ class QAChain:
         """
 
         try:
-            # Pass formatted message to Gemini
-            answer = self._safe_llm_call([prompt])
+            # Pass formatted message to OpenAI
+            answer = self._safe_llm_call(prompt)
 
             seen = set()
             deduped_lines = []
@@ -196,7 +211,7 @@ class QAChain:
 
             text_context.append("\n".join(entry))
 
-        # Convert images to Gemini-compatible format
+        # Convert images to OpenAI-compatible format
         image_parts = []
         valid_image_paths = []
         for path in image_paths:
@@ -206,7 +221,7 @@ class QAChain:
                 img.convert("RGB").save(img_byte_arr, format='JPEG')
                 image_parts.append({
                     "mime_type": "image/jpeg",
-                    "data": img_byte_arr.getvalue()
+                    "data": base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
                 })
                 valid_image_paths.append(path)
             except Exception as e:
@@ -227,30 +242,25 @@ class QAChain:
         """
 
         # Build proper message format
-        message = {
-            "role": "user",
-            "content": [
-                {"text": prompt},
-                *[
-                    {
-                        "inline_data": {
-                            "mime_type": part["mime_type"],
-                            "data": part["data"]
-                        }
-                    } for part in image_parts
-                ]
-            ]
-        }
+        message_content = [{"type": "text", "text": prompt}]
+        message_content.extend(
+            {
+                "type": "image_url",
+                "image_url": f"data:{part['mime_type']};base64,{part['data']}"
+            }
+            for part in image_parts
+        )
+        message = HumanMessage(content=message_content)
 
         try:
-            # Pass formatted message to Gemini
-            answer = self._safe_llm_call([message])
+            # Pass formatted message to OpenAI
+            answer = self._safe_llm_call(message)
 
             # Post-processing
             final_image_refs = [
                 f"[Image:{os.path.basename(p)}]" for p in valid_image_paths]
             return {
-                "answer": answer.strip(),
+                "answer": answer.strip() if isinstance(answer, str) else answer,
                 "image_references": final_image_refs,
                 "source_paths": valid_image_paths
             }
@@ -274,8 +284,11 @@ class QAChain:
         Context: {str(context)[:2000]}
         """
         try:
-            response = self.llm.invoke(prompt)
-            return float(response.strip()) if response.strip().isdigit() else 0.0
+            response = self._safe_llm_call(prompt)
+            # Extract content from response if it's an AIMessage object
+            response_text = response.content if hasattr(response, "content") else str(response)
+            response_text = response_text.strip()
+            return float(response_text) if response_text.isdigit() else 0.0
         except Exception as e:
             print(f"LLM Error: {str(e)}")
             return 0.0  # Fallback to assuming irrelevant

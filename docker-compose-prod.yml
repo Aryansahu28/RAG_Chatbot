@@ -24,15 +24,20 @@ services:
       - uploaded_files_volume:/app/uploaded_files 
       - logs_volume:/app/logs 
     environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
       - DB_HOST=${DB_HOST}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=${DB_NAME}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PINECONE_API_KEY=${PINECONE_API_KEY}
+      - PINECONE_ENVIRONMENT=${PINECONE_ENVIRONMENT}
+      - PINECONE_TEXT_INDEX=${PINECONE_TEXT_INDEX}
+      - PINECONE_IMAGE_INDEX=${PINECONE_IMAGE_INDEX}
+      - PINECONE_POD_TYPE=${PINECONE_POD_TYPE}
       - FRONTEND_ORIGINS=${FRONTEND_ORIGINS}
       - BASE_URL=${BASE_URL}
-      - FLASK_ENV=${FLASK_ENV}
+      - APP_ENV=${APP_ENV}
     depends_on:
       - mysql
     restart: unless-stopped

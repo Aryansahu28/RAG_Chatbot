@@ -1,276 +1,287 @@
-import chromadb
-from chromadb.config import Settings
 import logging
 import os
+from typing import Any, Dict, Iterable, List, Optional, Sequence
+
+from pinecone import Pinecone, ServerlessSpec
+
 from embedding_model import MultiModalEmbedder
 import config as cfg
 from sumarizer import Summarizer
+
 logger = logging.getLogger(__name__)
 
-CHROMA_DATA_DIR = cfg.CHROMA_DATA_DIR  # Ensure this is correctly imported
 
 class VectorStore:
     def __init__(self):
-        # Initialize embedder
         self.embedder = MultiModalEmbedder()
+        self.dimension = cfg.PINECONE_DIMENSION
+        self.metric = cfg.PINECONE_METRIC
 
-        # Create persistent storage directory
-        self.persist_dir = CHROMA_DATA_DIR
-        os.makedirs(self.persist_dir, exist_ok=True)
+        api_key = cfg.PINECONE_API_KEY or os.environ.get("PINECONE_API_KEY")
+        environment = cfg.PINECONE_ENVIRONMENT or os.environ.get("PINECONE_ENVIRONMENT")
 
-        # Configure client with persistent settings
-        self.client = chromadb.Client(Settings(
-            persist_directory=self.persist_dir,
-            is_persistent=True
-        ))
+        if not api_key:
+            raise RuntimeError(
+                "Pinecone configuration missing. Set PINECONE_API_KEY in your environment."
+            )
 
-        # Create separate collections
-        self.text_collection = self.client.get_or_create_collection(
-            name="text_documents",
-            metadata={"hnsw:space": "cosine"}
+        # Initialize Pinecone client (new API v3+)
+        self.pc = Pinecone(api_key=api_key)
+
+        self.text_index_name = cfg.PINECONE_TEXT_INDEX
+        self.image_index_name = cfg.PINECONE_IMAGE_INDEX
+
+        self._ensure_index(self.text_index_name)
+        self._ensure_index(self.image_index_name)
+
+        self.text_index = self.pc.Index(self.text_index_name)
+        self.image_index = self.pc.Index(self.image_index_name)
+
+    def _ensure_index(self, index_name: str):
+        # Check if index exists using new API with retry logic
+        max_retries = 3
+        retry_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                existing_indexes = self.pc.list_indexes().names()
+                if index_name in existing_indexes:
+                    return
+                break  # Successfully got list, index doesn't exist
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"Failed to list indexes (attempt {attempt + 1}/{max_retries}): {str(e)}. Retrying in {retry_delay}s..."
+                    )
+                    import time
+                    time.sleep(retry_delay)
+                else:
+                    logger.error(f"Failed to list indexes after {max_retries} attempts: {str(e)}")
+                    # Assume index doesn't exist and try to create it
+                    break
+
+        logger.info(
+            "Creating Pinecone index '%s' (dimension=%d, metric=%s)",
+            index_name,
+            self.dimension,
+            self.metric,
         )
-        self.image_collection = self.client.get_or_create_collection(
-            name="image_documents",
-            metadata={"hnsw:space": "cosine"}
-        )
+
+        # Use ServerlessSpec for serverless indexes (new API)
+        # Get region from PINECONE_REGION, or try to parse from PINECONE_ENVIRONMENT
+        region = cfg.PINECONE_REGION or "us-east-1"  # default to us-east-1
+        
+        if not region and cfg.PINECONE_ENVIRONMENT:
+            # Try to parse region from old environment format (e.g., "us-east-1-aws" -> "us-east-1")
+            # Common formats: "us-east-1-aws", "gcp-starter", etc.
+            env_str = cfg.PINECONE_ENVIRONMENT.lower()
+            # Check for common AWS regions
+            aws_regions = ["us-east-1", "us-east-2", "us-west-1", "us-west-2", 
+                          "eu-west-1", "eu-west-2", "eu-central-1", "ap-southeast-1"]
+            for r in aws_regions:
+                if r in env_str:
+                    region = r
+                    break
+        
+        if not region:
+            region = "us-east-1"  # final fallback
+
+        logger.info(f"Creating Pinecone index with region: {region}")
+
+        # Create index with retry logic
+        for attempt in range(max_retries):
+            try:
+                self.pc.create_index(
+                    name=index_name,
+                    dimension=self.dimension,
+                    metric=self.metric,
+                    spec=ServerlessSpec(
+                        cloud="aws",
+                        region=region
+                    )
+                )
+                return
+            except Exception as e:
+                if "already exists" in str(e).lower() or "already in use" in str(e).lower():
+                    logger.info(f"Index '{index_name}' already exists (or being created)")
+                    return
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"Failed to create index (attempt {attempt + 1}/{max_retries}): {str(e)}. Retrying in {retry_delay}s..."
+                    )
+                    import time
+                    time.sleep(retry_delay)
+                else:
+                    logger.error(f"Failed to create index after {max_retries} attempts: {str(e)}")
+                    raise
+
+    @staticmethod
+    def _build_metadata(text: str, metadata: Dict[str, Any], doc_type: str) -> Dict[str, Any]:
+        combined = dict(metadata or {})
+        combined["document"] = text
+        combined["type"] = doc_type
+        return combined
+
+    @staticmethod
+    def _to_vector_payload(
+        doc_id: str,
+        embedding: Sequence[float],
+        metadata: Dict[str, Any],
+    ):
+        return {
+            "id": doc_id,
+            "values": list(embedding),
+            "metadata": metadata,
+        }
 
     def add_text_embedding(self, doc_id, embedding, text, metadata):
-        """Store with text content and metadata"""
         try:
-            self.text_collection.add(
-                ids=[doc_id],
-                embeddings=[embedding],
-                documents=[text],
-                metadatas=[metadata]
+            # Check dimension mismatch
+            embedding_dim = len(embedding)
+            if embedding_dim != self.dimension:
+                error_msg = (
+                    f"Dimension mismatch: Embedding has {embedding_dim} dimensions, "
+                    f"but index '{self.text_index_name}' expects {self.dimension} dimensions. "
+                    f"Please update PINECONE_DIMENSION in your .env file to {embedding_dim}, "
+                    f"or use an index with dimension {embedding_dim}."
+                )
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            payload = self._to_vector_payload(
+                doc_id,
+                embedding,
+                self._build_metadata(text, metadata, "text"),
             )
-            # self.client.persist()  # Explicitly save changes
-        except Exception as e:
-            logger.error(f"Error adding embedding: {str(e)}")
+            self.text_index.upsert(vectors=[payload])
+        except Exception as e:  # pragma: no cover - external service
+            logger.error(f"Error adding text embedding to Pinecone: {str(e)}")
+            raise
 
     def add_image_embedding(self, doc_id, embedding, text, metadata):
         try:
-            self.image_collection.add(
-                ids=[doc_id],
-                embeddings=[embedding],
-                documents=[text],
-                metadatas=[metadata]
+            payload = self._to_vector_payload(
+                doc_id,
+                embedding,
+                self._build_metadata(text, metadata, "image"),
             )
-        except Exception as e:
-            logger.error(f"Error adding embedding: {str(e)}")
+            self.image_index.upsert(vectors=[payload])
+        except Exception as e:  # pragma: no cover
+            logger.error(f"Error adding image embedding to Pinecone: {str(e)}")
 
     def add_embedding(self, doc_id, embedding, text, metadata):
-        """Store with text content and metadata"""
-        try:
-            self.text_collection.add(
-                ids=[doc_id],
-                embeddings=[embedding],
-                documents=[text],
-                metadatas=[metadata]
-            )
-            # self.client.persist()  # Explicitly save changes
-        except Exception as e:
-            logger.error(f"Error adding embedding: {str(e)}")
+        self.add_text_embedding(doc_id, embedding, text, metadata)
+
+    @staticmethod
+    def _process_matches(matches: Iterable[Dict[str, Any]]) -> List[str]:
+        processed = [
+            (match["id"], match.get("score", 0.0))
+            for match in matches or []
+        ]
+        processed.sort(key=lambda x: x[1], reverse=True)
+        return [doc_id for doc_id, _ in processed]
 
     def query(self, query_embedding, n_results=5):
-
-        # Query both collections
-        text_results = self.text_collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results
+        text_results = self.text_index.query(
+            vector=query_embedding,
+            top_k=n_results,
+            include_values=False,
+            include_metadata=True,
         )
-        image_results = self.image_collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results
+        image_results = self.image_index.query(
+            vector=query_embedding,
+            top_k=n_results,
+            include_values=False,
+            include_metadata=True,
         )
 
-        # Get sorted document IDs
-        return self._merge_results(text_results, image_results)[:n_results]
+        combined = []
+        for match in text_results.matches or []:
+            combined.append((match["id"], match.get("score", 0.0)))
+        for match in image_results.matches or []:
+            combined.append((match["id"], match.get("score", 0.0)))
 
-    def _merge_results(self, text_res, image_res):
-        """Combine and sort results by score, return only doc_ids"""
-        processed = []
-
-        # Process text results with scores
-        for ids, distances in zip(text_res['ids'], text_res['distances']):
-            for doc_id, distance in zip(ids, distances):
-                processed.append((doc_id, 1 - distance))  # (doc_id, score)
-
-        # Process image results with scores
-        for ids, distances in zip(image_res['ids'], image_res['distances']):
-            for doc_id, distance in zip(ids, distances):
-                processed.append((doc_id, 1 - distance))  # (doc_id, score)
-
-        # Sort by score descending, then extract IDs
-        processed.sort(key=lambda x: x[1], reverse=True)
-        return [doc_id for doc_id, score in processed]
+        combined.sort(key=lambda x: x[1], reverse=True)
+        return [doc_id for doc_id, _ in combined[:n_results]]
 
     def image_query(self, query_embedding, n_results=5):
-        """Search only image embeddings"""
-        results = self.image_collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results
+        results = self.image_index.query(
+            vector=query_embedding,
+            top_k=n_results,
+            include_values=False,
+            include_metadata=True,
         )
-
-        processed = []
-        # Process text results with scores
-        for ids, distances in zip(results['ids'], results['distances']):
-            for doc_id, distance in zip(ids, distances):
-                processed.append((doc_id, 1 - distance))  # (doc_id, score)
-        # Sort by score descending, then extract IDs
-        processed.sort(key=lambda x: x[1], reverse=True)
-        return [doc_id for doc_id, score in processed]
+        return self._process_matches(results.matches)
 
     def text_query(self, query_embedding, n_results=5):
-        """Search only text/document embeddings"""
-        results = self.text_collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results
+        results = self.text_index.query(
+            vector=query_embedding,
+            top_k=n_results,
+            include_values=False,
+            include_metadata=True,
         )
+        return self._process_matches(results.matches)
 
-        processed = []
-        # Process text results with scores
-        for ids, distances in zip(results['ids'], results['distances']):
-            for doc_id, distance in zip(ids, distances):
-                processed.append((doc_id, 1 - distance))  # (doc_id, score)
-        # Sort by score descending, then extract IDs
-        processed.sort(key=lambda x: x[1], reverse=True)
-        return [doc_id for doc_id, score in processed]
-    
-    # Filtered query with metadata conditions
-    def filtered_query(self, query_embedding=None, filter_condition=None, collection_type="text", n_results=5):
-        """
-        Search documents with metadata filtering
-        """
-        collection = self.text_collection if collection_type == "text" else self.image_collection
-        
-        try:
-            # If no embedding provided, use get() with where filter
-            if query_embedding is None and filter_condition:
-                result = collection.get(
-                    where=filter_condition,
-                    limit=n_results,
-                    include=["documents", "metadatas"]
-                )
-                return result["ids"]  # Just return the IDs
-                
-            # Otherwise use query() with embedding
-            query_params = {"n_results": n_results}
-            
-            if query_embedding:
-                query_params["query_embeddings"] = [query_embedding]
-                
-            if filter_condition:
-                query_params["where"] = filter_condition
-                
-            # Execute the query
-            results = collection.query(**query_params)
-            
-            processed = []
-            for ids, distances in zip(results['ids'], results['distances']):
-                for doc_id, distance in zip(ids, distances):
-                    processed.append((doc_id, 1 - distance))
-                    
-            processed.sort(key=lambda x: x[1], reverse=True)
-            return [doc_id for doc_id, score in processed]
-            
-        except Exception as e:
-            print(f"Error in filtered query: {str(e)}")
+    def filtered_query(
+        self,
+        query_embedding: Optional[Sequence[float]] = None,
+        filter_condition: Optional[Dict[str, Any]] = None,
+        collection_type: str = "text",
+        n_results: int = 5,
+    ):
+        index = self.text_index if collection_type == "text" else self.image_index
+
+        if query_embedding is None and not filter_condition:
             return []
-    
+
+        try:
+            query_kwargs: Dict[str, Any] = {
+                "top_k": n_results,
+                "include_values": False,
+                "include_metadata": True,
+            }
+            if query_embedding is not None:
+                query_kwargs["vector"] = query_embedding
+            if filter_condition:
+                query_kwargs["filter"] = filter_condition
+
+            results = index.query(**query_kwargs)
+            return self._process_matches(results.matches)
+        except Exception as e:  # pragma: no cover
+            logger.error(f"Error in filtered query: {str(e)}")
+            return []
+
     def delete_from_text_collection(self, doc_id):
-        """Delete document(s) from text collection"""
-        # Ensure doc_id is a list
         ids = doc_id if isinstance(doc_id, list) else [doc_id]
-        # Check if IDs exist first
-        existing_ids = self.text_collection.get(ids=ids, include=[])["ids"]
-        if existing_ids:
-            self.text_collection.delete(ids=existing_ids)
-            print(f"Successfully deleted IDs: {existing_ids} from vector")
-        else:
-            print(f"No matching IDs found: {ids}")
+        self.text_index.delete(ids=ids)
 
     def delete_from_image_collection(self, doc_id):
-        """Delete document(s) from image collection"""
-        # Ensure doc_id is a list
         ids = doc_id if isinstance(doc_id, list) else [doc_id]
-        # Check if IDs exist first
-        existing_ids = self.image_collection.get(ids=ids, include=[])["ids"]
-        if existing_ids:
-            self.image_collection.delete(ids=existing_ids)
-            print(f"Successfully deleted IDs: {existing_ids} from image vector")
-        else:
-            print(f"No matching IDs found: {ids}")
+        self.image_index.delete(ids=ids)
 
-    # Get the document content and metadata by ID(doc_id)
     def get_document_by_id(self, doc_id, collection_type="text"):
-        """
-        Retrieve human-readable document information by ID
-        
-        Args:
-            doc_id: The document ID to retrieve
-            collection_type: Either "text" or "image"
-        
-        Returns:
-            Dictionary with document content and metadata
-        """
-        collection = self.text_collection if collection_type == "text" else self.image_collection
-        
+        index = self.text_index if collection_type == "text" else self.image_index
         try:
-            # Get full document info
-            result = collection.get(
-                ids=[doc_id],
-                include=["documents", "metadatas"]
-            )
-            
-            if result["ids"]:
-                return {
-                    "id": result["ids"][0],
-                    "content": result["documents"][0],
-                    "metadata": result["metadatas"][0]
-                }
-            else:
+            result = index.fetch(ids=[doc_id])
+            vector_data = result.vectors.get(doc_id)
+            if not vector_data:
                 return None
-        except Exception as e:
-            print(f"Error retrieving document {doc_id}: {str(e)}")
+
+            metadata = vector_data.get("metadata", {})
+            return {
+                "id": doc_id,
+                "content": metadata.get("document"),
+                "metadata": metadata,
+            }
+        except Exception as e:  # pragma: no cover
+            logger.error(f"Error retrieving document {doc_id}: {str(e)}")
             return None
 
-    # Get all documents in the text collection or image collection    
     def get_all_documents_data(self, collection_type="text"):
-        """
-        Retrieve all documents in the text collection
-        
-        Returns:
-            List of dictionaries with document content and metadata
-        """
-
-        collection = self.text_collection if collection_type == "text" else self.image_collection
-        try:
-            # Get all documents from the text collection
-            result = collection.get(
-                include=["documents", "metadatas", "embeddings"]
-            )
-            
-            # Check if any documents were found
-            if not result["ids"]:
-                print("No documents found in text collection")
-                return []
-            
-            # Format the results into a list of dictionaries
-            documents = []
-            for i, doc_id in enumerate(result["ids"]):
-                documents.append({
-                    "id": doc_id,
-                    "content": result["documents"][i],
-                    "metadata": result["metadatas"][i],
-                    "embedding_size": len(result["embeddings"][i]) if "embeddings" in result else None
-                })
-                
-            print(f"Found {len(documents)} documents in text collection")
-            return documents
-        
-        except Exception as e:
-            print(f"Error retrieving documents from text collection: {str(e)}")
-            return []
+        logger.warning(
+            "get_all_documents_data is not supported with Pinecone; returning empty list."
+        )
+        return []
 
 if __name__=="__main__":
     vector_store = VectorStore()
