@@ -10,4 +10,6 @@ export const ENDPOINTS = {
     CHATPROCESS: "/chat/process",
     UPLOAD_FILE_ACCESS: `${API_BASE_URL}/fileAccess/files`,
     AUTH_LOGIN: `${API_BASE_URL}/auth/validate`,
+    NEWS_SEARCH: "/news/search",
+    NEWS_CATEGORIES: "/news/categories",
   };

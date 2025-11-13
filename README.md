@@ -40,6 +40,7 @@ Users can organize documents into workspaces, chat with their content, and recei
 * **Multi-format Document Processing**: Supports PDF, DOCX, TXT, and image files
 * **Workspace Management**: Organize documents into logical workspaces
 * **AI-Powered Chat**: Interact with documents using natural language
+* **Live News Integration**: Fetch and integrate real-time news articles via MCP server
 * **Image Analysis**: Extract and analyze content from images
 * **Text Extraction & Analysis**: Process text from various sources
 * **Vector-based Semantic Search**: Find information by meaning, not just keywords
@@ -64,11 +65,20 @@ Users can organize documents into workspaces, chat with their content, and recei
 * It supports images also with the response ,like with pdf it will also give the reference images of the answer.
 * Can search from direct images uploaded by toggling to image .
 * Can also view the file uploaded very easily .
+* **Live News Integration**: Automatically detects news-related queries and fetches real-time news articles to combine with document context
 * Improvements: well there is lot of improvements  there in this while project  , this is just simple approach to query from your data given.
 
   ![chat_Section](https://github.com/user-attachments/assets/a9465eaa-474b-4b16-94bb-d958e77b2e98)
 
   ![image_Search](https://github.com/user-attachments/assets/45d97928-c8d6-433b-a1d2-f2eb16bd5033)
+
+## Live News Section:
+* **Dedicated News Page**: Access live news search at `/news` route
+* **MCP Server Integration**: Custom Model Context Protocol server for fetching news articles
+* **Automatic Detection**: Chat interface automatically detects news queries and includes live news context
+* **Category & Language Filters**: Search news by category (business, technology, sports, etc.) and language
+* **Real-time Updates**: Fetch the latest news articles from NewsAPI
+* **RAG Integration**: News articles are seamlessly integrated with document context for comprehensive answers
 
 ## Secureity Section:
 * Well although this is only for my one person agent , but still need a security so added a simple admin login .
@@ -116,6 +126,8 @@ Users can organize documents into workspaces, chat with their content, and recei
 * OpenAI API (gpt-4.1-mini)
 * Pinecone Vector Database
 * PyPDF
+* MCP (Model Context Protocol) SDK
+* NewsAPI Integration
 
 ### Infrastructure
 
@@ -131,6 +143,7 @@ Users can organize documents into workspaces, chat with their content, and recei
 * 8GB+ RAM (recommended)
 * OpenAI API key
 * Pinecone API key
+* NewsAPI key (optional, for news features)
 
 ## Installation
 
@@ -162,6 +175,7 @@ BASE_URL=http://localhost:5000
 MYSQL_ROOT_PASSWORD=your-mysql-root-password
 MYSQL_DATABASE=pdf_qa
 VITE_BACKEND_URL=http://localhost:5000
+NEWS_API_KEY=your-newsapi-key
 ```
 
 Start the environment:
@@ -219,6 +233,8 @@ Visit: [https://your-domain.com](https://your-domain.com)
 | PINECONE\_IMAGE\_INDEX| Pinecone image index  | image-documents                                |
 | PINECONE\_POD\_TYPE   | Pinecone pod type     | p1.x1                                          |
 | APP\_ENV              | Backend env           | development                                    |
+| NEWS\_API\_KEY        | NewsAPI key           | None (optional, for news features)            |
+| NEWS\_API\_BASE\_URL  | NewsAPI base URL      | https://newsapi.org/v2                         |
 
 ### Nginx Configuration (default.prod.conf)
 
@@ -264,10 +280,14 @@ querypilot/
 │   ├── public/
 │   ├── src/
 │   │   ├── api_calls/
+│   │   │   └── newsAPI.jsx
 │   │   ├── component/
 │   │   ├── pages/
 │   │   │   ├── chatsection/
-│   │   │   └── landingpage/
+│   │   │   ├── landingpage/
+│   │   │   └── news/
+│   │   │       ├── NewsPage.jsx
+│   │   │       └── NewsPage.module.css
 │   │   ├── services/
 │   │   └── utils/
 │   ├── index.html
@@ -281,11 +301,16 @@ querypilot/
 │   │   │   ├── fileProcessingAPI.py
 │   │   │   ├── fileManagerAPI.py
 │   │   │   ├── workspaceManagerAPI.py
+│   │   │   ├── newsAPI.py
 │   │   │   └── index.py
+│   │   ├── mcp_server/
+│   │   │   ├── __init__.py
+│   │   │   └── news_mcp_server.py
 │   │   ├── database.py
 │   │   ├── vector_store.py
 │   │   ├── process_files.py
 │   │   ├── qa_chain.py
+│   │   ├── chat.py
 │   │   └── config.py
 │   └── Dockerfile.prod
 │
@@ -323,6 +348,11 @@ querypilot/
 
 * `POST /chat/process`
 
+### News API
+
+* `POST /news/search` - Search for news articles
+* `GET /news/categories` - Get available news categories
+
 ### File Access
 
 * `GET /fileAccess/files/:workspace_name/:filename`
@@ -332,7 +362,8 @@ querypilot/
 ### Main Pages
 
 * **Landing Page**: Intro to QueryPilot
-* **Chat Interface**: Document querying
+* **Chat Interface**: Document querying with automatic news integration
+* **News Page**: Dedicated live news search interface
 
 ### Key Components
 
@@ -340,6 +371,7 @@ querypilot/
 * `WorkspaceSelector`: Workspace management
 * `MarkdownViewer`: AI responses
 * `FileItem`: File sidebar listing
+* `NewsPage`: Live news search and display
 
 ## Vector Storage
 
@@ -377,6 +409,24 @@ Uses **OpenAI API** for:
 * Text Summarization
 * Context Validation
 
+## News Integration
+
+Uses **MCP (Model Context Protocol)** and **NewsAPI** for:
+
+* Live News Fetching: Real-time news articles via MCP server
+* Automatic Detection: Chat interface automatically detects news queries
+* RAG Integration: News articles combined with document context
+* Category Filtering: Search by business, technology, sports, etc.
+* Multi-language Support: Search news in multiple languages
+* Dedicated Interface: Standalone `/news` page for news search
+
+### How It Works
+
+1. **Automatic Detection**: When users ask questions containing news-related keywords (e.g., "latest news", "recent", "breaking"), the system automatically fetches relevant news articles
+2. **Context Integration**: News articles are added to the RAG context alongside document content
+3. **Unified Answers**: The LLM generates responses combining both document knowledge and live news
+4. **Standalone Access**: Users can also access news directly via the `/news` page for dedicated news searching
+
 ## Troubleshooting
 
 ### Common Issues
@@ -396,6 +446,11 @@ Uses **OpenAI API** for:
 * **DB Connection Errors**:
 
   * Fix: Set `DB_HOST=mysql`
+
+* **News API Errors**:
+
+  * Fix: Ensure `NEWS_API_KEY` is set in `.env` (get free key from [newsapi.org](https://newsapi.org/))
+  * Note: News features are optional - the app works without it, but news queries won't fetch articles
 
 
 

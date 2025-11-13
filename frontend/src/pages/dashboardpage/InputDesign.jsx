@@ -413,6 +413,14 @@ const cancelDeleteWorkspace = () => {
           <span style={{fontWeight:700}}>+ New Workspace</span>
         </button>
 
+        <button
+          className={`${styles.newsButton} ${styles.builder406332cfa22246a8ad8c0f41622ad024}`}
+          onClick={() => navigate('/news')}
+          aria-label="Go to live news"
+        >
+          <span style={{fontWeight:700}}>📰 Live News</span>
+        </button>
+
         <button 
         className={`${styles.logoutButton}`}
         onClick={logout}>

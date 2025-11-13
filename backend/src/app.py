@@ -32,6 +32,7 @@ from flaskAPI.fileAccess import router as file_access_router  # noqa: E402
 from flaskAPI.fileManagerAPI import router as file_manager_router  # noqa: E402
 from flaskAPI.fileProcessingAPI import router as file_processing_router  # noqa: E402
 from flaskAPI.workspaceManagerAPI import router as workspace_router  # noqa: E402
+from flaskAPI.newsAPI import router as news_router  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -164,6 +165,7 @@ app.include_router(workspace_router, prefix="/workspaces", tags=["workspaces"])
 app.include_router(chat_router, prefix="/chat", tags=["chat"])
 app.include_router(file_access_router, prefix="/fileAccess", tags=["file access"])
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(news_router, prefix="/news", tags=["news"])
 
 
 class LogEntry(BaseModel):

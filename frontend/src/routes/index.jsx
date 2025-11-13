@@ -4,6 +4,7 @@ import DashboardPage from "../pages/dashboardpage/InputDesign";
 import LandingPage from "../pages/landingpage/InputDesign";
 import ChatPage from "../pages/chatsection/Chat";
 import PopUp from "../pages/chatsection/UploadPopUp";
+import NewsPage from "../pages/news/NewsPage";
 import {AdminSignIn} from "../pages/auth/BasicLogin/SimpleLogin";
 import { useAuth } from "../services/AuthContext";
 import Loading from "../components/Loading"
@@ -23,6 +24,7 @@ const AppRoute =()=>{
                 <Route path="/dashboard" 
                 element={ authenticated ? <DashboardPage /> : <Navigate to ="/securitycheck" />} />
                 <Route path="/chat" element={ authenticated ? <ChatPage /> : <Navigate to = "/securitycheck" />} />
+                <Route path="/news" element={ authenticated ? <NewsPage /> : <Navigate to = "/securitycheck" />} />
                 <Route path="/popup" element={<PopUp />} />
                 <Route path="/securitycheck" element={authenticated ? <Navigate to ="/dashboard" />: <AdminSignIn />} />
             </Routes>

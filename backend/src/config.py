@@ -32,3 +32,7 @@ PINECONE_IMAGE_INDEX=os.environ.get("PINECONE_IMAGE_INDEX", "image-documents")
 PINECONE_METRIC=os.environ.get("PINECONE_METRIC", "cosine")
 PINECONE_POD_TYPE=os.environ.get("PINECONE_POD_TYPE", "p1.x1")
 PINECONE_DIMENSION=int(os.environ.get("PINECONE_DIMENSION", "768"))
+
+# News API Configuration
+NEWS_API_KEY=os.environ.get("NEWS_API_KEY")
+NEWS_API_BASE_URL=os.environ.get("NEWS_API_BASE_URL", "https://newsapi.org/v2")

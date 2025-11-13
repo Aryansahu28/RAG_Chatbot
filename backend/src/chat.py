@@ -14,6 +14,7 @@ import database
 def get_db():
     return database.Database()
 
+
 # here question type is either text or image
 def answer_question(question, search_type,workspace_name=None):
     summarizer = Summarizer()
